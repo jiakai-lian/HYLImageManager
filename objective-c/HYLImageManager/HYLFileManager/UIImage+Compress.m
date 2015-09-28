@@ -1,5 +1,5 @@
 //
-//  UIImage+Store.m
+//  UIImage+Compress.m
 //The MIT License (MIT)
 //
 //Copyright (c) 2015 Yilei He
@@ -23,15 +23,15 @@
 //OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 //SOFTWARE.
 
-#import "UIImage+Store.h"
+#import "UIImage+Compress.h"
 
-static float const kDefaultMaxWidth = 800.0;
-static float const kDefaultMaxHeight = 600.0;
+static float const kDefaultMaxWidth = 0.0;
+static float const kDefaultMaxHeight = 0.0;
 
 //static float const kDefaultThumbnailMaxWidth = 100.0;
 static float const kDefaultThumbnailMaxHeight = 100.0;
 
-@implementation UIImage(Store)
+@implementation UIImage(Compress)
 
 - (void)writeImageToFile:(NSString *)path{
     [self writeImageToFile:path isThumbnail:NO];
@@ -44,9 +44,9 @@ static float const kDefaultThumbnailMaxHeight = 100.0;
 -(void)writeImageToFile:(NSString *)path isThumbnail:(BOOL)isThumbnail compressQuality:(float)quality{
     UIImage *resizedImage;
     if (isThumbnail) {
-        resizedImage = [UIImage compressedImage:self withMaxWidth:0 maxHeight:kDefaultThumbnailMaxHeight];
+        resizedImage = [UIImage compressedImage:self withMaxWidth:0 maxHeight:kDefaultThumbnailMaxHeight quality:quality];
     }else{
-        resizedImage = [UIImage compressedImage:self];
+        resizedImage = [UIImage compressedImage:self withMaxWidth:kDefaultMaxWidth maxHeight:kDefaultMaxHeight quality:quality];
     }
     NSData *dataResized = UIImageJPEGRepresentation(resizedImage, 1.0);
     [dataResized writeToFile:path atomically:YES];

@@ -29,6 +29,7 @@
 @property(nonatomic, strong) NSMutableDictionary *downloadingTasks;
 @property(nonatomic, strong) NSURLSession *backgroundSession;
 @property(nonatomic, strong) NSMutableDictionary *completionHandlerDictionary;
+@property(nonatomic, strong) HYLFileManager *fileManager;
 
 @end
 
@@ -37,9 +38,10 @@
 #pragma mark - constructor
 
 - (instancetype)initWithRootPathComponents:(nullable NSArray *)pathComponents identifier:(NSString *)identifier {
-    self = [super initWithRootPathComponents:pathComponents];
+    self = [super init];
     if (self) {
         _identifier = identifier;
+        _fileManager = [[HYLFileManager alloc]initWithDirectory:NSDocumentDirectory rootPathComponents:pathComponents];
     }
     return self;
 }
@@ -54,13 +56,23 @@
     return self;
 }
 
++(instancetype)defaultManager{
+    static dispatch_once_t pred;
+    static id sharedInstance = nil;
+    dispatch_once(&pred, ^{
+        sharedInstance = [[[self class] alloc] init];
+    });
+    return sharedInstance;
+}
+
+
 #pragma mark - Utility method
 + (NSString *)localPathForFileInDocumentWithFileName:(NSString *)name {
-    return [[HYLFileManager defaultManager] pathInDocumentsForFileName:name];
+    return [[HYLFileManager defaultManager] pathForFileName:name];
 }
 
 - (NSString *)localPathForFileInDocumentWithFileName:(NSString *)name {
-    return [self pathInDocumentsForFileName:name];
+    return [self.fileManager pathForFileName:name];
 }
 
 #pragma mark - download tasks
@@ -70,6 +82,8 @@
 }
 
 - (NSURLSessionDownloadTask *)startDownloadTaskWithURL:(NSString *)urlString {
+    NSAssert(urlString.length>0, @"Download URL can't be empty");
+    NSAssert([urlString hasPrefix:@"http"]||[urlString hasPrefix:@"https"], @"The download url must be valid");
     NSURLSessionDownloadTask *task = self.downloadingTasks[urlString];
     if (task) {
         if (task.state != NSURLSessionTaskStateCompleted) {
@@ -100,6 +114,13 @@
         }];
 }
 
+-(BOOL)fileExistsInDocumentsForFileName:(NSString * __nonnull)fileName{
+    return [self.fileManager fileExistsForFileName:fileName];
+}
+
+-(BOOL)deleteFileInDocumentsWithName:(NSString * __nonnull)filename error:(NSError *__autoreleasing  __nullable * __nullable)error{
+    return [self.fileManager deleteFileWithName:filename error:error];
+}
 #pragma mark - getters
 - (NSMutableDictionary *)downloadingTasks {
     if (!_downloadingTasks) {
@@ -128,18 +149,26 @@
     NSURL *destinationURL = [NSURL fileURLWithPath:destinationPath];
 
     /* move file to destination */
-    NSFileManager *fileManager = [NSFileManager defaultManager];
     NSError *error;
-    if ([fileManager fileExistsAtPath:[destinationURL path]]) {
-        [fileManager replaceItemAtURL:destinationURL
-                        withItemAtURL:destinationURL
+    if ([[NSFileManager defaultManager] fileExistsAtPath:destinationPath]) {
+        [[NSFileManager defaultManager] replaceItemAtURL:destinationURL
+                        withItemAtURL:location
                        backupItemName:nil
                               options:NSFileManagerItemReplacementUsingNewMetadataOnly
                      resultingItemURL:nil
                                 error:&error];
     } else {
-        if (![fileManager moveItemAtURL:location toURL:destinationURL error:&error]) {
-            NSLog(@"Move file to %@ error!", destinationURL.absoluteString);
+        BOOL isDir;
+        NSError *error2;
+        if (![[NSFileManager defaultManager] fileExistsAtPath:[destinationPath stringByDeletingLastPathComponent] isDirectory:&isDir]||!isDir) {
+            [[NSFileManager defaultManager] createDirectoryAtPath:[destinationPath stringByDeletingLastPathComponent] withIntermediateDirectories:YES attributes:nil error:&error2];
+            if (error2) {
+                NSLog(@"%@", error2.localizedDescription);
+            }
+        }
+        
+        if (![[NSFileManager defaultManager] moveItemAtURL:location toURL:destinationURL error:&error]) {
+            NSLog(@"Move file to %@ error! %@", destinationURL.absoluteString, error.localizedDescription);
         }
     }
 
@@ -167,11 +196,22 @@ expectedTotalBytes:(int64_t)expectedTotalBytes {
 
 #pragma mark - NSURLSessionTaskDelegate
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
-    [self.downloadingTasks removeObjectForKey:task.originalRequest.URL.absoluteString];
+    if (task.originalRequest.URL.absoluteString) {
+        [self.downloadingTasks removeObjectForKey:task.originalRequest.URL.absoluteString];
+    }
     if (error) {
-        NSString *destinationPath = [self pathInDocumentsForFileName:task.originalRequest.URL.lastPathComponent];
+        NSString *destinationPath = [self localPathForFileInDocumentWithFileName:task.originalRequest.URL.lastPathComponent];
         if([[NSFileManager defaultManager] fileExistsAtPath:destinationPath]){
             [[NSFileManager defaultManager] removeItemAtPath:destinationPath error:NULL];
+        }
+        if (error.code==-1002) {
+            /* In this case, task.originalRequest.URL is nil */
+            for (NSString *key in self.downloadingTasks.allKeys) {
+                if(self.downloadingTasks[key] == task){
+                    [self.downloadingTasks removeObjectForKey:key];
+                    break;
+                }
+            }
         }
     }
     /* send notification */
